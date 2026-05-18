@@ -1,0 +1,128 @@
+services:
+  # --------------------------------------------------------------------------
+  # 1. 인프라 계층 (Infrastructure Layer)
+  # --------------------------------------------------------------------------
+
+  # PostgreSQL: Sentinel-Fi의 메인 RDB 저장소
+  db:
+    image: postgres:15
+    container_name: sentinel_fi_db
+    environment:
+      POSTGRES_DB: sentinel_fi_db         # 메인 데이터베이스 이름
+      POSTGRES_USER: ssafy    # 데이터베이스 관리자 계정
+      POSTGRES_PASSWORD: 1q2w3e4r # [주의] 실제 배포 시에는 외부 .env 파일로 관리 권장
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data # 컨테이너 삭제 후에도 데이터 보존
+
+  # Redis: 실시간 시세 캐싱 및 세션 관리용 인메모리 DB
+  redis:
+    image: redis:7
+    container_name: sentinel_fi_redis
+    ports:
+      - "6379:6379"
+
+  # Zookeeper: Kafka 클러스터 관리를 위한 코디네이터
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: sentinel_fi_zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  # Kafka: 실시간 금융 데이터를 유실 없이 전달하는 메시지 브로커
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: sentinel_fi_kafka
+    ports:
+      - "9092:9092"   # 컨테이너 내부 통신용
+      - "29092:29092" # 호스트 머신(로컬 수집기 등)에서 접근용
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: sentinel_fi_zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://sentinel_fi_kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+
+  # --------------------------------------------------------------------------
+  # 2. 데이터 처리 계층 (Data Processing Layer)
+  # --------------------------------------------------------------------------
+
+  # Flink JobManager: 스트리밍 분석 작업 관리 및 스케줄링
+  jobmanager:
+    build:
+      context: ./data-pjt
+      dockerfile: flink.dockerfile # 연산용 파일
+    image: sentinelfi_pyflink
+    container_name: sentinel_fi_flink_jobmanager
+    hostname: jobmanager
+    ports:
+      - "8081:8081" # Flink 웹 UI 대시보드 접근용
+    command: jobmanager
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    volumes:
+      - ./workspace:/opt/flink/workspace # 분석 로직 코드가 담긴 폴더 연결
+
+  # Flink TaskManager: 실제 실시간 연산(급락 탐지 등)을 수행하는 유닛
+  taskmanager:
+    build:
+      context: ./data-pjt
+      dockerfile: flink.dockerfile
+    image: sentinelfi_pyflink
+    container_name: sentinel_fi_flink_taskmanager
+    depends_on:
+      - jobmanager
+    command: taskmanager
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+    volumes:
+      - ./workspace:/opt/flink/workspace
+
+# 아래 프론트 백 서비스는 개발 단계에서는 비활성화 합니다.
+# 나중에 실제로 배포한다면 생각해봐욜
+
+# --------------------------------------------------------------------------
+# 3. 서비스 계층 (Service Layer) 
+# --------------------------------------------------------------------------
+
+# Django Backend: Sentinel-Fi의 REST API 서버
+# backend:
+  # build: ./backend-pjt
+  # container_name: sentinel_fi_backend
+  # volumes:
+  #   - ./backend-pjt:/app
+  # ports:
+  #   - "8000:8000"
+  # environment:
+  #   - DEBUG=1
+  #   - DB_HOST=db             # 수정: 서비스명 사용
+  #   - DB_NAME=sentinel_fi_db
+  #   - DB_USER=ssafy
+  #   - DB_PASSWORD=1q2w3e4r
+  #   - REDIS_HOST=redis       # 수정: 서비스명 사용
+  #   - KAFKA_BOOTSTRAP_SERVERS=kafka:9092 # 수정: 서비스명 사용
+  # depends_on:
+  #   - db                     # 수정: 서비스명 사용
+  #   - redis                  # 수정: 서비스명 사용
+  #   - kafka                  # 수정: 서비스명 사용
+
+# Vue.js Frontend: 사용자에게 실시간 시세와 대시보드를 보여주는 웹 화면
+# frontend:
+  # build: ./front-pjt
+  # container_name: sentinel_fi_frontend
+  # volumes:
+  #   - ./front-pjt:/app
+  #   - /app/node_modules # 로컬의 node_modules가 컨테이너 설정을 덮어쓰지 않게 보호
+  # ports:
+  #   - "8080:8080"
+  # depends_on:
+  #   - backend # 백엔드 API가 준비된 후 실행
