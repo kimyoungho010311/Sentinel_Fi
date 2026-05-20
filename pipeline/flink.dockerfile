@@ -36,4 +36,8 @@ COPY flink-sql-connector-kafka-3.3.0-1.19.jar /opt/flink/lib/
 # 9. 파이프라인 코드 복사
 COPY jobs/utils/ /usr/local/lib/python3.10/dist-packages/utils/
 
+# -- JDBC 및 PostgreSQL 드라이버 라이브러리 추가 ------
+COPY flink-connector-jdbc-3.1.2-1.17.jar /opt/flink/lib
+COPY postgresql-42.7.3.jar /opt/flink/lib
+
 WORKDIR /opt/flink

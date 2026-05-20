@@ -3,9 +3,12 @@ import json
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.window import SlidingEventTimeWindows
 from pyflink.datastream.connectors.kafka import KafkaSource, KafkaOffsetsInitializer
+from pyflink.datastream.connectors.jdbc import JdbcSink, JdbcConnectionOptions, JdbcExecutionOptions
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.watermark_strategy import WatermarkStrategy
 from pyflink.common.time import Duration, Time
+from pyflink.common.typeinfo import Types
+from pyflink.common import Row
 
 # 워터마크 전략
 from utils.watermark import get_ticker_watermark_strategy
@@ -56,9 +59,31 @@ def run_pipeline():
     #    → timestamp 가장 작은 것 / 가장 큰 것
     result_stream = windowed_stream.aggregate(DropDetectorAggregate())
 
-    alert_stream = result_stream.filter(lambda result: result is not None and result['status'] != "정상")
-    # alert_stream.print()
-    result_stream.print()
+    jdbc_sink = JdbcSink.sink(
+        'INSERT INTO drop_logs (market_code, start_price, end_price, change_rate, status) VALUES (?, ?, ?, ?, ?)',
+        Types.ROW([Types.STRING(), Types.DOUBLE(), Types.DOUBLE(), Types.DOUBLE(), Types.STRING()]),
+        JdbcConnectionOptions.JdbcConnectionOptionsBuilder()
+            .with_url("jdbc:postgresql://sentinel_fi_db:5432/sentinel_fi_db")
+            .with_driver_name("org.postgresql.Driver")
+            .with_user_name("ssafy")
+            .with_password("1q2w3e4r")
+            .build(),
+        JdbcExecutionOptions.builder()
+            .with_batch_size(50) # 50건씩 묶어서 넣기
+            .with_batch_interval_ms(1000) # 혹은 1초마다 넣기
+            .build()
+    )
+
+    alert_stream = result_stream.filter(lambda result: result is not None)
+    row_stream = alert_stream.map(
+    lambda r: Row(r['code'], float(r['start_price']), float(r['end_price']), float(r['change_rate']), r['status']),
+    output_type=Types.ROW([Types.STRING(), Types.DOUBLE(), Types.DOUBLE(), Types.DOUBLE(), Types.STRING()])
+    )
+
+    alert_stream.print()
+    row_stream.add_sink(jdbc_sink)
+    # result_stream.print()
+
     env.execute('Drop Detection Job')
 
 if __name__ == '__main__':

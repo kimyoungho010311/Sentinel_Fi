@@ -1,5 +1,5 @@
 from pyflink.datastream.functions import AggregateFunction
-
+import os
 class DropDetectorAggregate(AggregateFunction):
     """
     5분 윈도우 바구니 내부에서 가장 첫 가격과 마지막 가격을 찾아
@@ -7,11 +7,12 @@ class DropDetectorAggregate(AggregateFunction):
     """
 
     def create_accumulator(self):
-        # [중간 저장소 초기화] (가장 작은 값용, 가장 큰 값용)
+        # [중간 장소 초기화] (가장 작은 값용, 가장 큰 값용)
         # (최초_데이터, 최신_데이터) 구조로 저장합니다.
         return (None, None)
 
     def add(self, value, accumulator):
+        # print(f"데이터 유입 완료 코인: {value.get('code')}, 데이터 시각(TS): {value.get('timestamp')}")
         # 데이터가 바구니에 한 건씩 들어올 때마다 실행됩니다.
         first_data, last_data = accumulator
 
@@ -27,6 +28,7 @@ class DropDetectorAggregate(AggregateFunction):
 
     def get_result(self, accumulator):
         # 5분이 끝나고 최종 결과물을 낼 때 딱 한 번 실행됩니다.
+        # print(f"실제 실행중인 metrics.py의 위치: {os.path.abspath(__file__)}")
         first_data, last_data = accumulator
 
         if first_data is None or last_data is None:
@@ -41,14 +43,21 @@ class DropDetectorAggregate(AggregateFunction):
         # 7단계: 변동률 계산
         change_rate = ((end_price - start_price) / start_price) * 100
 
-        # 8단계: 업비트 기준 등급 판단 (예시: -1% 주의, -3% 경고, -5% 위험)
-        status = "정상"
-        if change_rate <= -5.0:
-            status = "🚨 위험 (5% 이상 급락!)"
-        elif change_rate <= -3.0:
-            status = "⚠️ 경고 (3% 이상 급락)"
-        elif change_rate <= -1.0:
-            status = "👀 주의 (1% 이상 하락)"
+        # 8단계: 업비트 기준 등급 판단
+        status = "normal"
+        
+        if change_rate >= 200:
+            status = 'danger'
+        elif change_rate >= 100:
+            status = "warning"
+        elif change_rate >= 50:
+            status = 'caution'
+        elif change_rate <= -90:
+            status='danger'
+        elif change_rate <= -75:
+            status = 'warning'
+        elif change_rate <= -50:
+            status = 'caution'
 
         return {
             "code": first_data['code'],
@@ -58,6 +67,6 @@ class DropDetectorAggregate(AggregateFunction):
             "status": status
         }
 
-    def merge(self, a, b):
+    def merge(self, a, b): 
         # 분산 환경에서 결과를 합칠 때 쓰는 함수 (형식상 구현)
         return a
