@@ -33,5 +33,7 @@ RUN ln -s /usr/bin/python3 /usr/bin/python && \
 
 # 8. 커넥터 복사
 COPY flink-sql-connector-kafka-3.3.0-1.19.jar /opt/flink/lib/
+# 9. 파이프라인 코드 복사
+COPY jobs/utils/ /usr/local/lib/python3.10/dist-packages/utils/
 
 WORKDIR /opt/flink

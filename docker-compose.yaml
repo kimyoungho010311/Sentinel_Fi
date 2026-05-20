@@ -48,6 +48,7 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # 존재하지 않는 토픽 접근 시 자동 생성하는 옵션
     depends_on:
       - zookeeper
 
@@ -58,7 +59,7 @@ services:
   # Flink JobManager: 스트리밍 분석 작업 관리 및 스케줄링
   jobmanager:
     build:
-      context: ./data-pjt
+      context: ./pipeline
       dockerfile: flink.dockerfile # 연산용 파일
     image: sentinelfi_pyflink
     container_name: sentinel_fi_flink_jobmanager
@@ -70,11 +71,12 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     volumes:
       - ./workspace:/opt/flink/workspace # 분석 로직 코드가 담긴 폴더 연결
+      - ./pipeline/jobs:/opt/flink/pipeline # Flink 작업 정의 파일 연결
 
   # Flink TaskManager: 실제 실시간 연산(급락 탐지 등)을 수행하는 유닛
   taskmanager:
     build:
-      context: ./data-pjt
+      context: ./pipeline
       dockerfile: flink.dockerfile
     image: sentinelfi_pyflink
     container_name: sentinel_fi_flink_taskmanager
@@ -86,6 +88,7 @@ services:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
     volumes:
       - ./workspace:/opt/flink/workspace
+      - ./pipeline/jobs:/opt/flink/pipeline # Flink 작업 정의 파일 연결
 
 # 아래 프론트 백 서비스는 개발 단계에서는 비활성화 합니다.
 # 나중에 실제로 배포한다면 생각해봐욜

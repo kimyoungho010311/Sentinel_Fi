@@ -3,6 +3,7 @@ import sys
 import django
 import json
 import logging
+import time
 from confluent_kafka import Consumer, KafkaError
 
 # ── Django 초기화 ──────────────────────────────────────────
@@ -95,6 +96,9 @@ def run():
                 continue
 
             data = json.loads(msg.value().decode("utf-8"))
+            # 지연시간 측정 용도
+            # latency = (time.time() * 1000) - data.get('timestamp')
+            # print(f"데이터 지연: {latency:.0f}ms")
             parse_and_save(data)
 
     except KeyboardInterrupt:
