@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class DropLogsConfig(AppConfig):
+class WindowStatsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'drop_logs'
+    name = 'window_stats'

@@ -41,7 +41,7 @@ INSTALLED_APPS = [
     'market_data',
     'accounts',
     'alerts',
-    'drop_logs',
+    'window_stats',
 ]
 
 MIDDLEWARE = [

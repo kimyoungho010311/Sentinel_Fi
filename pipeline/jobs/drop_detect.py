@@ -13,13 +13,12 @@ from pyflink.common import Row
 # 워터마크 전략
 from utils.watermark import get_ticker_watermark_strategy
 # 급락 탐지 로직
-from utils.metrics import DropDetectorAggregate
+from utils.metrics import DropDetectorAggregate, WindowMetaFunction
 from pyflink.datastream.functions import AggregateFunction
 
 def run_pipeline():
     # 1. Kafka 소스 연결 (ticker 토픽)
     env = StreamExecutionEnvironment.get_execution_environment()
-    # env.add_python_archive('/opt/flink/pipeline/utils.zip', 'utils')
     kafka_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
     # Kafka 소스 설정
@@ -33,6 +32,7 @@ def run_pipeline():
         .set_starting_offsets(KafkaOffsetsInitializer.latest()) \
         .set_value_only_deserializer(SimpleStringSchema()) \
         .build()
+        
     # 2. JSON 파싱 (문자열 → 딕셔너리)
     text_stream = env.from_source(
         kafka_source, 
@@ -57,11 +57,22 @@ def run_pipeline():
     )
     # 6. 윈도우 내 첫 가격 / 마지막 가격 추출
     #    → timestamp 가장 작은 것 / 가장 큰 것
-    result_stream = windowed_stream.aggregate(DropDetectorAggregate())
+    result_stream = windowed_stream.aggregate(
+        DropDetectorAggregate(),
+        WindowMetaFunction(),
+        )
 
-    jdbc_sink = JdbcSink.sink(
-        'INSERT INTO drop_logs (market_code, start_price, end_price, change_rate, status) VALUES (?, ?, ?, ?, ?)',
-        Types.ROW([Types.STRING(), Types.DOUBLE(), Types.DOUBLE(), Types.DOUBLE(), Types.STRING()]),
+    jdbc_sink_window = JdbcSink.sink(
+        'INSERT INTO window_stats (window_start, window_end, start_price, end_price, change_rate, status, market_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        Types.ROW([
+            Types.SQL_TIMESTAMP(),
+            Types.SQL_TIMESTAMP(),
+            Types.DOUBLE(),
+            Types.DOUBLE(),
+            Types.DOUBLE(),
+            Types.STRING(),
+            Types.STRING()
+        ]),
         JdbcConnectionOptions.JdbcConnectionOptionsBuilder()
             .with_url("jdbc:postgresql://sentinel_fi_db:5432/sentinel_fi_db")
             .with_driver_name("org.postgresql.Driver")
@@ -74,16 +85,28 @@ def run_pipeline():
             .build()
     )
 
-    alert_stream = result_stream.filter(lambda result: result is not None)
-    row_stream = alert_stream.map(
-    lambda r: Row(r['code'], float(r['start_price']), float(r['end_price']), float(r['change_rate']), r['status']),
-    output_type=Types.ROW([Types.STRING(), Types.DOUBLE(), Types.DOUBLE(), Types.DOUBLE(), Types.STRING()])
-    )
-
-    alert_stream.print()
-    row_stream.add_sink(jdbc_sink)
-    # result_stream.print()
-
+    window_row_stream = result_stream.map(
+    lambda r: Row(
+        r['window_start'],
+        r['window_end'],
+        float(r['start_price']),
+        float(r['end_price']),
+        float(r['change_rate']),
+        r['status'],
+        r['code']
+    ),
+    output_type=Types.ROW([
+        Types.SQL_TIMESTAMP(),
+        Types.SQL_TIMESTAMP(),
+        Types.DOUBLE(),
+        Types.DOUBLE(),
+        Types.DOUBLE(),
+        Types.STRING(),
+        Types.STRING()
+    ])
+)
+    window_row_stream.add_sink(jdbc_sink_window)
+    
     env.execute('Drop Detection Job')
 
 if __name__ == '__main__':

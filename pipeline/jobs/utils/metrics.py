@@ -1,4 +1,5 @@
-from pyflink.datastream.functions import AggregateFunction
+from pyflink.datastream.functions import AggregateFunction, ProcessWindowFunction
+from datetime import datetime, timezone
 import os
 class DropDetectorAggregate(AggregateFunction):
     """
@@ -45,18 +46,18 @@ class DropDetectorAggregate(AggregateFunction):
 
         # 8단계: 업비트 기준 등급 판단
         status = "normal"
-        
-        if change_rate >= 200:
+
+        if change_rate >= 3.0:
             status = 'danger'
-        elif change_rate >= 100:
+        elif change_rate >= 1.0:
             status = "warning"
-        elif change_rate >= 50:
+        elif change_rate >= 0.5:
             status = 'caution'
-        elif change_rate <= -90:
-            status='danger'
-        elif change_rate <= -75:
+        elif change_rate <= -3.0:
+            status = 'danger'
+        elif change_rate <= -1.0:
             status = 'warning'
-        elif change_rate <= -50:
+        elif change_rate <= -0.5:
             status = 'caution'
 
         return {
@@ -70,3 +71,24 @@ class DropDetectorAggregate(AggregateFunction):
     def merge(self, a, b): 
         # 분산 환경에서 결과를 합칠 때 쓰는 함수 (형식상 구현)
         return a
+    
+class WindowMetaFunction(ProcessWindowFunction):
+    def process(self, key, context, elements):
+        # elements에는 AggregateFunction의 get_result() 결과가 들어온다.
+        result = list(elements)[0]
+
+        if result is None:
+            return
+
+        # 윈도우 시작/끝 시간 (밀리초 단위)
+        window_start = context.window().start
+        window_end = context.window().end
+
+        # 밀리초 -> datetime으로 변환
+        window_start_dt = datetime.fromtimestamp(window_start / 1000, tz=timezone.utc)
+        window_end_dt = datetime.fromtimestamp(window_end / 1000, tz=timezone.utc)
+
+        result['window_start'] = window_start_dt
+        result['window_end'] = window_end_dt
+
+        yield result
