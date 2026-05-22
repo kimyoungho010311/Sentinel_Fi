@@ -799,4 +799,6 @@ __screenshots__/
 # Vite
 *.timestamp-*-*.mjs
 
+/pipeline/checkpoints/
+
 # End of https://www.toptal.com/developers/gitignore/api/windows,macos,linux,visualstudiocode,pycharm,intellij,python,django,vuejs,vue,dotenv,node,java,gradle,redis
