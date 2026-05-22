@@ -15,7 +15,11 @@ services:
       - "5432:5432"
     volumes:
       - ./postgres_data:/var/lib/postgresql/data # 컨테이너 삭제 후에도 데이터 보존
-
+    healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U ssafy -d sentinel_fi_db"]
+          interval: 5s
+          timeout: 5s
+          retries: 5
   # Redis: 실시간 시세 캐싱 및 세션 관리용 인메모리 DB
   redis:
     image: redis:7
@@ -93,6 +97,27 @@ services:
       - ./pipeline/jobs:/opt/flink/pipeline # Flink 작업 정의 파일 연결
       - ./pipeline/jobs/utils:/usr/local/lib/python3.10/dist-packages/utils # utils/ 디렉토리 안에 있는 스크립트의 변경사항을 마운트
       - ./pipeline/checkpoints:/opt/flink/checkpoints # Flink CheckPoint 정보 저장 위치
+# --------------------------------------------------------------------------
+# 3. 데이터 관리 계층 (Data Management Layer)
+# --------------------------------------------------------------------------
+  airflow:
+      image: apache/airflow:2.7.2-python3.11
+      container_name: sentinel_fi_airflow
+      environment:
+        - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+        - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://ssafy:1q2w3e4r@db:5432/sentinel_fi_db
+        - AIRFLOW__CORE__LOAD_EXAMPLES=False
+        - AIRFLOW__LOGGING__LOGGING_LEVEL=INFO
+      depends_on:
+        db:
+          condition: service_healthy
+      volumes:
+        - ./pipeline/dags:/opt/airflow/dags
+        - ./backend-pjt/collector:/opt/airflow/backend-pjt
+      ports:
+        - "8080:8080"
+      command: bash -c "airflow db migrate && airflow users create --username admin --firstname Youngho --lastname Kim --role Admin --email admin@sentinel.fi --password admin && (airflow scheduler &) && airflow webserver"
+
 
 # 아래 프론트 백 서비스는 개발 단계에서는 비활성화 합니다.
 # 나중에 실제로 배포한다면 생각해봐욜
