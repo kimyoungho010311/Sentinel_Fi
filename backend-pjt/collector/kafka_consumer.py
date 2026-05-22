@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from market_data.models import Market, TickerDate
+from market_data.models import Market, TickerDate, BadTickerDate
 
 # ── 로깅 설정 ──────────────────────────────────────────────
 logging.basicConfig(
@@ -32,8 +32,33 @@ consumer = Consumer({
 })
 consumer.subscribe([KAFKA_TOPIC])
 
+def validate_data(data):
+    """UPBIT 데이터 무결성 검사 후 발생한 '모든' 에러 원인 리스트 반환"""
+    errors = []
 
-def parse_and_save(data):
+    # 1. 필수 필드 체크 (return하지 않고 리스트에 append)
+    required_fields = ['code', 'trade_price', 'timestamp']
+    for field in required_fields:
+        if data.get(field) is None:
+            errors.append(f"Missing Field: {field}")
+
+    # 2. 음수 체크
+    if data.get('trade_price', 0) < 0 or data.get('trade_volume', 0) < 0:
+        errors.append("Negative Value Error: price or volume is negative")
+
+    # 3. 범주형 데이터 체크
+    if data.get('change') not in {'RISE', 'EVEN', 'FALL'}:
+        errors.append(f"Invalid Change Type: {data.get('change')}")
+        
+    if data.get('stream_type') not in {'SNAPSHOT', 'REALTIME'}:
+        errors.append(f"Invalid Stream Type: {data.get('stream_type')}")
+
+    # 에러가 없으면 빈 리스트 []가 반환됩니다.
+    return errors
+
+
+
+def save_to_ticker_date(data):
     """Kafka 메시지 파싱 후 DB 저장"""
     try:
         market = Market.objects.get(market=data["code"])
@@ -80,6 +105,11 @@ def parse_and_save(data):
     except Exception as e:
         logger.error(f"저장 실패: {e} | 데이터: {data}")
 
+def save_to_bad_ticker_date(data, error_log):
+    BadTickerDate.objects.create(
+        raw_data = data,
+        error_log = error_log
+    )
 
 def run():
     logger.info("Kafka 컨슈머 시작")
@@ -99,7 +129,14 @@ def run():
             # 지연시간 측정 용도
             # latency = (time.time() * 1000) - data.get('timestamp')
             # print(f"데이터 지연: {latency:.0f}ms")
-            parse_and_save(data)
+
+            errors = validate_data(data)
+
+            if not errors:
+                save_to_ticker_date(data)
+            else:
+                error_message = ' | '.join(errors)
+                save_to_bad_ticker_date(data, error_message)
 
     except KeyboardInterrupt:
         logger.info("컨슈머 종료")

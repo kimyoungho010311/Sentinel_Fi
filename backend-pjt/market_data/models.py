@@ -71,3 +71,12 @@ class TickerDate(models.Model):
 
     class Meta:
         db_table = 'ticker_date'
+
+
+class BadTickerDate(models.Model):
+
+    raw_data = models.JSONField() # 원본 데이터 전체
+    error_log = models.TextField() # 에러 원인
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        db_table = 'bad_ticker_date'
