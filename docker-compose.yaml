@@ -73,6 +73,7 @@ services:
       - ./workspace:/opt/flink/workspace # 분석 로직 코드가 담긴 폴더 연결
       - ./pipeline/jobs:/opt/flink/pipeline # Flink 작업 정의 파일 연결
       - ./pipeline/jobs/utils:/usr/local/lib/python3.10/dist-packages/utils # utils/ 디렉토리 안에 있는 스크립트의 변경사항을 마운트
+      - ./pipeline/checkpoints:/opt/flink/checkpoints # Flink CheckPoint 정보 저장 위치
 
   # Flink TaskManager: 실제 실시간 연산(급락 탐지 등)을 수행하는 유닛
   taskmanager:
@@ -91,6 +92,7 @@ services:
       - ./workspace:/opt/flink/workspace
       - ./pipeline/jobs:/opt/flink/pipeline # Flink 작업 정의 파일 연결
       - ./pipeline/jobs/utils:/usr/local/lib/python3.10/dist-packages/utils # utils/ 디렉토리 안에 있는 스크립트의 변경사항을 마운트
+      - ./pipeline/checkpoints:/opt/flink/checkpoints # Flink CheckPoint 정보 저장 위치
 
 # 아래 프론트 백 서비스는 개발 단계에서는 비활성화 합니다.
 # 나중에 실제로 배포한다면 생각해봐욜

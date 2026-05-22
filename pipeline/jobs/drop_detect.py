@@ -19,6 +19,8 @@ from pyflink.datastream.functions import AggregateFunction
 def run_pipeline():
     # 1. Kafka 소스 연결 (ticker 토픽)
     env = StreamExecutionEnvironment.get_execution_environment()
+    env.enable_checkpointing(60000) # 60초마다 체크포인트
+    env.get_checkpoint_config().set_checkpoint_storage_dir("file:///opt/flink/checkpoints")   
     kafka_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
     # Kafka 소스 설정
