@@ -10,6 +10,7 @@ class Market(models.Model):
     dep_amt_soar = models.BooleanField(default=False, null=True)
     global_diff = models.BooleanField(default=False, null=True)
     small_acc_conc = models.BooleanField(default=False, null=True)
+    is_active = models.BooleanField(default=True, null=False)
 
     class Meta:
         db_table = 'market'
