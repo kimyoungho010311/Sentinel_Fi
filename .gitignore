@@ -1,6 +1,3 @@
-# Created by https://www.toptal.com/developers/gitignore/api/windows,macos,linux,visualstudiocode,pycharm,intellij,python,django,vuejs,vue,dotenv,node,java,gradle,redis
-# Edit at https://www.toptal.com/developers/gitignore?templates=windows,macos,linux,visualstudiocode,pycharm,intellij,python,django,vuejs,vue,dotenv,node,java,gradle,redis
-
 ### Django ###
 *.log
 *.pot

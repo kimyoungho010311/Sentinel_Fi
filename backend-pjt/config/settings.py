@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-
+import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -83,7 +83,7 @@ DATABASES = {
         'NAME': 'sentinel_fi_db',
         'USER': 'ssafy',
         'PASSWORD': '1q2w3e4r',
-        'HOST': 'localhost',
+        'HOST': os.environ.get("DJANGO_DB_HOST", "localhost"),
         'PORT': '5432',
     }
 }

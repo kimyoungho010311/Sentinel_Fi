@@ -101,7 +101,10 @@ services:
 # 3. 데이터 관리 계층 (Data Management Layer)
 # --------------------------------------------------------------------------
   airflow:
-      image: apache/airflow:2.7.2-python3.11
+      build:
+        context: ./pipeline
+        dockerfile: airflow.dockerfile
+      image: sentinel_fi_airflow:custom-2.7.2
       container_name: sentinel_fi_airflow
       environment:
         - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -113,7 +116,8 @@ services:
           condition: service_healthy
       volumes:
         - ./pipeline/dags:/opt/airflow/dags
-        - ./backend-pjt/collector:/opt/airflow/backend-pjt
+        - ./backend-pjt/collector:/opt/airflow/backend-pjt/collector
+        - ./backend-pjt/:/opt/airflow/backend-pjt
       ports:
         - "8080:8080"
       command: bash -c "airflow db migrate && airflow users create --username admin --firstname Youngho --lastname Kim --role Admin --email admin@sentinel.fi --password admin && (airflow scheduler &) && airflow webserver"
