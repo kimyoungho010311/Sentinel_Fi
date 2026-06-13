@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'accounts',
     'alerts',
     'window_stats',
+    'flink_metrics',
 ]
 
 MIDDLEWARE = [

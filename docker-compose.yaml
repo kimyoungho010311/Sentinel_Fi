@@ -92,6 +92,10 @@ services:
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - | # 아래 설정으로 플링크 테스크 슬롯을 늘려준다.
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
     volumes:
       - ./workspace:/opt/flink/workspace
       - ./pipeline/jobs:/opt/flink/pipeline # Flink 작업 정의 파일 연결
