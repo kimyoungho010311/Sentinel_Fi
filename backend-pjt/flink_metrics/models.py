@@ -24,3 +24,23 @@ class FlinkMetric(models.Model):
     class Meta:
         db_table = 'flink_realtime_metric'
         ordering = ['-checked_at']
+
+class FlinkMarketMetric(models.Model):
+    checked_at = models.DateTimeField(db_index=True, verbose_name='체크 타임스탬프')
+    market = models.CharField(max_length=20, db_index=True, verbose_name='마켓 코드')
+    time_unit = models.CharField(max_length=5, default='1s')
+
+    collected_count = models.BigIntegerField(verbose_name='마켓별 소비 데이터 개수')
+    error_count = models.IntegerField(verbose_name='마켓별 에러 수')
+    error_rate_percentage = models.FloatField(verbose_name='마켓별 에러율 퍼센티지')
+
+    average_latency_ms = models.FloatField(verbose_name='평균 처리 지연 시간')
+    max_latency_ms = models.FloatField(verbose_name='최대 처리 지연 시간')
+    trade_volume_krw = models.FloatField(verbose_name='초당 거래 대금')
+
+    class Meta:
+        db_table = 'flink_market_metric'
+        ordering = ['-checked_at']
+        indexes = [
+            models.Index(fields=['market', '-checked_at']),
+        ]
