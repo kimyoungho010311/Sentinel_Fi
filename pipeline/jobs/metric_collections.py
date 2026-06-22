@@ -151,6 +151,7 @@ def parse_metric_event(msg):
 def run_pipeline():
     # 1. 플링크 실행 환경 시동
     env = StreamExecutionEnvironment.get_execution_environment()
+    env.set_parallelism(4)
     env.enable_checkpointing(60000) # 60초마다 체크포인트
     env.get_checkpoint_config().set_checkpoint_storage_dir("file:///opt/flink/checkpoints")   
     
@@ -197,7 +198,7 @@ def run_pipeline():
         ])
     )
 
-    metric_stream.print()
+    # metric_stream.print()
 
     jdbc_sink = JdbcSink.sink(
         """
@@ -231,7 +232,7 @@ def run_pipeline():
             .with_password("1q2w3e4r")
             .build(),
         JdbcExecutionOptions.builder()
-            .with_batch_size(10)
+            .with_batch_size(1)
             .with_batch_interval_ms(10000)
             .build()
     )

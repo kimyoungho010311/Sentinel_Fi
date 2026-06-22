@@ -1,582 +1,354 @@
-# 📈 금융 데이터 기반 실시간 이상 징후 탐지 & 맞춤형 자산 큐레이션 서비스
+# Sentinel-Fi
 
-> 작성일: 2026-05-08
-버전: v1.0 (초안)
-> 
+> Kafka와 Flink 기반 실시간 암호화폐 시세 처리 및 이상 변동 탐지 파이프라인
 
----
+Sentinel-Fi는 암호화폐 거래소인 업비트(Upbit)에서 발생하는 실시간 거래 데이터를 Kafka로 수집하고, Flink에서 집계와 이상 변동 탐지를 수행한 뒤 PostgreSQL에 저장하는 데이터 파이프라인 프로젝트입니다.
 
-## 목차
-
-1. [서비스 개요 & 목표](https://claude.ai/chat/71fa7d37-557a-439b-9c9f-1d3268146712#1-%EC%84%9C%EB%B9%84%EC%8A%A4-%EA%B0%9C%EC%9A%94--%EB%AA%A9%ED%91%9C)
-2. [기술 스택 선택 근거](https://claude.ai/chat/71fa7d37-557a-439b-9c9f-1d3268146712#2-%EA%B8%B0%EC%88%A0-%EC%8A%A4%ED%83%9D-%EC%84%A0%ED%83%9D-%EA%B7%BC%EA%B1%B0)
-3. [데이터 파이프라인 설계](https://claude.ai/chat/71fa7d37-557a-439b-9c9f-1d3268146712#3-%EB%8D%B0%EC%9D%B4%ED%84%B0-%ED%8C%8C%EC%9D%B4%ED%94%84%EB%9D%BC%EC%9D%B8-%EC%84%A4%EA%B3%84)
-4. [DB 스키마 설계](https://claude.ai/chat/71fa7d37-557a-439b-9c9f-1d3268146712#4-db-%EC%8A%A4%ED%82%A4%EB%A7%88-%EC%84%A4%EA%B3%84)
-5. [API 명세 초안](https://claude.ai/chat/71fa7d37-557a-439b-9c9f-1d3268146712#5-api-%EB%AA%85%EC%84%B8-%EC%B4%88%EC%95%88)
-6. [개발 일정 & 역할 분담](https://claude.ai/chat/71fa7d37-557a-439b-9c9f-1d3268146712#6-%EA%B0%9C%EB%B0%9C-%EC%9D%BC%EC%A0%95--%EC%97%AD%ED%95%A0-%EB%B6%84%EB%8B%B4)
+초기에는 금융 데이터 기반 개인화 서비스까지 포함한 웹 서비스로 기획했지만, 데이터 엔지니어 역량을 살려 실시간 데이터 수집, 스트림 처리, 지연 시간 측정, 데이터 품질 검증, 저장 병목 개선을 중심으로 프로젝트의 범위를 재정의했습니다.
 
 ---
 
-## 1. 서비스 개요 & 목표
+## 1. 프로젝트 목표
 
-### 한 줄 소개
+이 프로젝트의 핵심 목표는 실시간 금융 데이터를 안정적으로 수집하고, 처리 과정에서 발생하는 지연과 병목을 정량적으로 관찰할 수 있는 파이프라인을 구성하는 것입니다.
 
-> 주식·암호화폐 데이터를 실시간으로 수집·분석하여, 이상 징후를 탐지하고 사용자 행동 기반 맞춤형 자산 정보를 큐레이션하는 웹 서비스
-> 
-
-### 핵심 가치
-
-| 구분 | 내용 |
-| --- | --- |
-| 기존 서비스와의 차이 | 단순 시세 조회가 아닌, **통계 기반 이상 탐지 + 개인화 대시보드** 제공 |
-| 대상 사용자 | 금융 데이터에 관심 있는 개인 투자자 |
-| 핵심 차별점 | AI 없이 엔지니어링 로직(DTW, 상관관계, 표준편차)만으로 인사이트 생성 |
-
-### 주요 기능 목록
-
-**기본 기능**
-
-- 실시간 주식·암호화폐 시세 목록 및 상세 조회
-- 종목 좋아요(관심 등록) 및 활동 로그 기록
-- 회원가입 / 로그인 / 로그아웃 (JWT 인증)
-- 종목·뉴스 검색 (Elasticsearch)
-
-**인사이트 기능**
-
-- 급락·급등 이상 징후 실시간 탐지 및 경보 (Flink CEP)
-- 현재 차트와 과거 유사 패턴 매칭 (Spark DTW)
-- 상관관계 높은 두 종목 간 괴리율 실시간 포착
-- 표준편차(σ)를 벗어나는 이상 변동 자동 알림
-
-**개인화 기능**
-
-- 사용자별 맞춤 자산 큐레이션 (조회수·좋아요 기반)
-- 활동 대시보드: 관심 종목 변동률, 카테고리별 조회 통계
-- 최근 본 종목 목록 / 좋아요 목록 시각화
+- WebSocket 기반 실시간 시세 데이터를 Kafka로 수집
+- Flink로 1초 단위 처리량, 지연 시간, 오류율 집계
+- Flink Event Time 윈도우를 사용한 급등락 탐지
+- PostgreSQL에 실시간 집계 결과 및 탐지 결과 저장
+- 데이터 품질 오류를 분리 저장하여 원인 추적 가능하게 구성
+- Django를 통해 API를 구축하여 개발자에게 1초 단위 데이터 흐름정보 제공
 
 ---
 
-## 2. 기술 스택 선택 근거
+## 2. 아키텍처
 
-### 전체 구성
+![System Architecture](/img/system_architecture.png)
 
-```
-[외부 API] → Kafka → Flink → PostgreSQL / Redis
-                   → HDFS  → Spark → Airflow
-                                    ↓
-                             Django DRF → Vue.js
-                             Elasticsearch
-```
-
-![image.png](img\image.png)
-
-### 레이어별 선택 근거
-
-### 수집 레이어
-
-| 기술 | 선택 이유 | 대안 대비 장점 |
-| --- | --- | --- |
-| **외부 금융 API** (Upbit, Binance, KRX) | WebSocket push 방식으로 초당 수십~수백 건 수집 | 폴링 방식 대비 지연 최소화 |
-| **Kafka** | 초당 수만 건 메시지를 유실 없이 완충하는 메시지 브로커 | Flink·Spark 둘 다 Kafka를 소스로 쓸 수 있어 단일 수집 창구 역할 |
-
-> Kafka 없이 Flink가 API를 직접 구독하면, 처리 속도가 소비 속도를 못 따라갈 때 데이터 유실 발생
-> 
-
-### 실시간 처리 레이어
-
-| 기술 | 선택 이유 | 구체적 역할 |
-| --- | --- | --- |
-| **Flink** | 스트리밍 처리 특화, 밀리초 단위 연산 가능 | CEP로 급락·급등 탐지, 이동평균·표준편차 계산, PostgreSQL 적재 |
-| **Redis** | "자주 바뀌고 자주 읽히는" 실시간 시세를 메모리에 캐싱 | PostgreSQL 부하 분산 (응답 속도 100~1000배 향상) |
-
-> Redis 캐시 패턴: Flink가 시세를 PostgreSQL에 쓸 때 동시에 Redis에도 갱신 → Django는 Redis에서 1ms 이내 응답, cache miss 시에만 PostgreSQL 조회
-> 
-
-### 배치 처리 레이어
-
-| 기술 | 선택 이유 | 구체적 역할 |
-| --- | --- | --- |
-| **HDFS** | 수년치 Raw 데이터 장기 보존 (데이터 레이크) | PostgreSQL은 서비스용, HDFS는 분석용 원본 저장소 |
-| **Spark** | TB급 과거 데이터 병렬 분산 처리 | DTW 패턴 매칭, 종목 간 상관관계 매트릭스, 사용자 행동 분석 → Insight 테이블 적재 |
-| **Airflow** | 배치 작업 스케줄링 및 의존 관계 관리 | 매일 새벽 2시 상관관계 계산 → 완료 시 추천 점수 업데이트 DAG |
-
-### 서비스 레이어
-
-| 기술 | 선택 이유 | 구체적 역할 |
-| --- | --- | --- |
-| **PostgreSQL** | 관계형 데이터 관리, Django ORM 궁합 우수 | User·Asset·MarketData·UserLog·Insight 5개 핵심 테이블 |
-| **Elasticsearch** | PostgreSQL LIKE 검색 대비 역색인 구조로 압도적 속도 | 종목명 초성 검색, 뉴스 전문 검색 |
-| **Django REST Framework** | Python 생태계 (Pandas·NumPy 연동), Serializer-View-URL 구조 | REST API 서버, JWT 인증 |
-| **Vue.js** | SPA로 페이지 전환 없이 실시간 시세 업데이트 가능 | Vue Router 라우팅, Chart.js/ECharts 대시보드 |
+**여기에 핵심적인 테이블 정보만 넣자.**
 
 ---
 
-## 3. 데이터 파이프라인 설계
+## 3. 기술 스택
 
-### 실시간 파이프라인 (Kafka → Flink → PostgreSQL/Redis)
-
-```
-[Upbit WebSocket]  ─┐
-[Binance WebSocket] ─┤→ Kafka Producer → [Topic: market-raw]
-[KRX REST Polling] ─┘
-
-[Topic: market-raw]
-  → Flink Consumer
-      ├─ 이동평균 / 표준편차 계산
-      ├─ CEP: 5% 이상 급변 시 Alert 이벤트 발행 → [Topic: alerts]
-      ├─ PostgreSQL: MarketData INSERT
-      └─ Redis: SET price:{asset_id} (TTL 2초)
-```
-
-### 배치 파이프라인 (Kafka → HDFS → Spark → Airflow)
-
-```
-Kafka → Kafka Connect (HDFS Sink) → HDFS /raw/market/{date}/
-
-Airflow DAG (매일 02:00)
-  Task 1: Spark 상관관계 매트릭스 계산
-    → HDFS 과거 데이터 로드
-    → 종목 간 Pearson r 연산
-    → PostgreSQL Insight 테이블 UPDATE
-
-  Task 2: Spark DTW 패턴 매칭
-    → 현재 30일 차트 vs 과거 데이터 유사도 계산
-    → 상위 3개 유사 구간 추출
-    → PostgreSQL Insight 테이블 UPDATE
-
-  Task 3: 사용자 행동 분석
-    → UserLog 집계 (카테고리별 조회수, 좋아요 빈도)
-    → 맞춤 추천 점수 계산
-    → PostgreSQL Insight 테이블 UPDATE
-```
-
-### Elasticsearch 마이그레이션
-
-```
-PostgreSQL [Asset 테이블]
-  → Django Management Command (초기 1회)
-  → Elasticsearch Index: assets
-      mapping:
-        name: text (analyzer: korean)
-        ticker: keyword
-        category: keyword
-        description: text
-
-PostgreSQL [뉴스/인사이트]
-  → Logstash 또는 커스텀 스크립트 (주기적 동기화)
-  → Elasticsearch Index: news
-```
+| 영역 | 기술 | 사용 목적 |
+| --- | --- | --- |
+| Data Source | Upbit WebSocket | 실시간 암호화폐 ticker 데이터 수집 |
+| Message Broker | Kafka | 수집 속도와 처리 속도 분리, 메시지 버퍼링 |
+| Stream Processing | Apache Flink | 실시간 윈도우 집계, 지연 시간 측정, 급등락 탐지 |
+| Database | PostgreSQL | 원천 데이터, 집계 결과, 이상 데이터 저장 |
+| Scheduler | Airflow | 마켓 코드 동기화 등 주기 작업 관리 |
+| Backend | Django | 데이터 모델링 및 관리 API 기반 |
+| Infra | Docker | Kafka, Flink, PostgreSQL, Airflow 로컬 실행 환경 구성 |
 
 ---
 
-## 4. DB 스키마 설계
+## 4. 핵심 구현 기능
 
-### ERD 개요
+### 실시간 데이터 수집
 
-```
-User ──< UserLog >── Asset
- |                    |
- └── Portfolio        └── MarketData
-                      |
-                      └── Insight
-```
+Upbit WebSocket을 통해 여러 암호화폐 거래 데이터를 실시간으로 구독합니다. 수신한 데이터는 Kafka `ticker` 토픽으로 전송되며, 이후 Flink와 Consumer가 동일한 토픽을 기준으로 데이터를 처리합니다.
 
-### 테이블 상세
+관련 파일:
 
-### User (사용자)
+- `backend-pjt/collector/upbit_ws.py`
+- `backend-pjt/collector/kafka_consumer.py`
 
-| 컬럼 | 타입 | 설명 |
-| --- | --- | --- |
-| id | UUID PK | 고유 식별자 |
-| username | VARCHAR(50) UNIQUE | 사용자명 |
-| email | VARCHAR(255) UNIQUE | 이메일 |
-| password | VARCHAR(255) | bcrypt 해싱 |
-| preferred_categories | JSONB | 관심 카테고리 (ex: ["crypto", "stock"]) |
-| created_at | TIMESTAMP | 가입일 |
-| last_login | TIMESTAMP | 최근 로그인 |
+### Flink 1초 단위 실시간 메트릭 집계
 
-### Asset (종목)
+Flink Metric Job은 Kafka에서 ticker 메시지를 읽고 1초 Tumbling Window 단위로 운영 지표를 계산합니다.
 
-| 컬럼 | 타입 | 설명 |
-| --- | --- | --- |
-| id | UUID PK | 고유 식별자 |
-| ticker | VARCHAR(20) UNIQUE | 종목 코드 (ex: BTC, AAPL) |
-| name | VARCHAR(100) | 종목명 |
-| category | VARCHAR(20) | 구분 (crypto / stock / etf) |
-| market | VARCHAR(20) | 거래소 (Upbit, NYSE, KRX 등) |
-| description | TEXT | 종목 설명 |
-| created_at | TIMESTAMP | 등록일 |
+집계 항목:
 
-### MarketData (시세)
+- 초당 수집 데이터 수
+- 총 오류 데이터 수
+- 오류율
+- 평균 지연 시간
+- 최대 지연 시간
+- 활성 마켓 수
+- 초당 총 거래대금
 
-| 컬럼 | 타입 | 설명 |
-| --- | --- | --- |
-| id | BIGSERIAL PK | 고유 식별자 |
-| asset_id | UUID FK → Asset | 종목 참조 |
-| price | NUMERIC(20, 8) | 현재가 |
-| change_rate | NUMERIC(8, 4) | 등락률 (%) |
-| volume | NUMERIC(20, 4) | 거래량 |
-| is_anomaly | BOOLEAN | 이상 징후 여부 (Flink 탐지) |
-| anomaly_type | VARCHAR(20) | 이상 유형 (flash_crash / spike 등) |
-| timestamp | TIMESTAMP | 시세 기준 시각 |
+관련 파일:
 
-> 파티셔닝 고려: timestamp 기준 월별 파티션 (데이터 증가 대비)
-> 
+- `pipeline/jobs/metric_collections.py`
+- `backend-pjt/flink_metrics/models.py`
 
-### UserLog (사용자 활동)
+### Flink 슬라이딩 윈도우 기반 급등락 탐지
 
-| 컬럼 | 타입 | 설명 |
-| --- | --- | --- |
-| id | BIGSERIAL PK | 고유 식별자 |
-| user_id | UUID FK → User | 사용자 참조 |
-| asset_id | UUID FK → Asset | 종목 참조 |
-| action | VARCHAR(20) | 행동 유형 (view / like / unlike / click) |
-| created_at | TIMESTAMP | 행동 발생 시각 |
+Drop Detection Job은 마켓별로 데이터를 그룹화한 뒤, 5분 크기의 Sliding Event Time Window에서 시작가와 종가를 비교합니다. 이를 통해 특정 시간 구간의 가격 변화율과 상태를 저장합니다.
 
-### Insight (분석 결과)
+> 급등락 기준은 업비트에서 제공되는 기준이 아닌 테스트를 위해 임의로 설정하였습니다.  
+> 업비트 급등락 기준: https://support.upbit.com/hc/ko/articles/900005994766-업비트-시장-경보-제도가-무엇인가요
 
-| 컬럼 | 타입 | 설명 |
-| --- | --- | --- |
-| id | UUID PK | 고유 식별자 |
-| asset_id | UUID FK → Asset | 종목 참조 |
-| insight_type | VARCHAR(30) | 인사이트 유형 (pattern_match / correlation / anomaly_summary) |
-| data | JSONB | Spark 분석 결과 (유연한 구조) |
-| generated_at | TIMESTAMP | 분석 생성 시각 |
+관련 파일:
 
-```json
-// data 예시 (pattern_match)
-{
-  "similar_periods": [
-    { "start": "2021-03-01", "end": "2021-04-15", "similarity": 0.94 },
-    { "start": "2022-11-10", "end": "2022-12-20", "similarity": 0.89 }
-  ],
-  "next_30d_avg_return": -3.2
-}
+- `pipeline/jobs/drop_detect.py`
+- `pipeline/jobs/utils/metrics.py`
+- `pipeline/jobs/utils/watermark.py`
+- `backend-pjt/window_stats/models.py`
 
-// data 예시 (correlation)
-{
-  "correlated_assets": [
-    { "ticker": "ETH", "r": 0.91 },
-    { "ticker": "BNB", "r": 0.78 }
-  ],
-  "divergence_alert": true,
-  "divergence_pct": 4.7
-}
+### Airflow 기반 마켓 코드 동기화
+
+Sentinel-Fi는 Upbit에서 지원하는 마켓 목록을 주기적으로 동기화하기 위해 Airflow DAG를 사용했습니다.
+
+Airflow는 실시간 ticker 처리에는 적합하지 않기 때문에, 초 단위 데이터 흐름과 오류율 계산은 Flink가 담당하고, Airflow는 하루 단위 또는 주기적 관리 작업을 담당하도록 역할을 분리했습니다.
+
+동기화 흐름:
+
+1. Airflow DAG가 Upbit Market API를 호출
+2. 현재 지원 중인 마켓 목록을 조회
+3. PostgreSQL `market` 테이블의 기존 마켓 목록과 비교
+4. 신규 상장 마켓과 비활성화된 마켓을 반영
+5. 이후 WebSocket Producer가 최신 마켓 목록을 기준으로 ticker를 구독
+
+관련 파일:
+
+- `pipeline/dags/fetch_coins.py`
+- `pipeline/dags/utils.py`
+- `backend-pjt/collector/sync_markets.py`
+- `backend-pjt/market_data/models.py`
+
+### 데이터 품질 검증
+
+Kafka Consumer는 ticker 데이터를 저장하기 전 필수 필드 누락, 음수 값, 잘못된 범주형 값 등을 검증합니다. 정상 데이터는 `TickerDate`에 저장하고, 비정상 데이터는 원본 데이터와 오류 사유를 함께 `BadTickerDate`에 저장합니다.
+
+품질 검증 테스트 방법은 임의로 비정상 데이터를 만들어 테스트해보았습니다. 실험 방법과 결과는 다음과 같습니다.
+
+먼저 kafka-console-producer.sh에 접속하여 비정상 데이터를 직접 kafka topic에게 전송합니다.
+
+```powershell
+docker exec -it sentinel_fi_kafka kafka-console-producer --broker-list localhost:9092 --topic ticker
 ```
 
-### 인덱스 전략
+그 다음 거래 금액이 음수인 비정상 데이터를 `JSON`형태로 kafka에게 전송합니다.
 
-```sql
--- 자주 조회되는 패턴 최적화
-CREATE INDEX idx_marketdata_asset_timestamp ON market_data(asset_id, timestamp DESC);
-CREATE INDEX idx_userlog_user_action ON user_log(user_id, action, created_at DESC);
-CREATE INDEX idx_insight_asset_type ON insight(asset_id, insight_type);
+```powershell
+> {"code": "KRW-BTC", "trade_price": -1, "timestamp": 1234567890, "change": "RISE", "stream_type": "REALTIME"}
 ```
+
+그 다음 `BadTickerDate` 테이블을 확인하면 아래와 같은 데이터가 생성된 것을 확인할 수 있습니다.
+
+```powershell
+id	6
+raw_data	{"code": "KRW-BTC", "change": "RISE", "timestamp": 1234567890, "stream_type": "REALTIME", "trade_price": -1}
+error_log	Negative Value Error: price or volume is negative
+created_at	2026-06-16 06:42:46.831016+00
+```
+
+관련 파일:
+
+- `backend-pjt/collector/kafka_consumer.py`
+- `backend-pjt/market_data/models.py`
 
 ---
 
-## 5. API 명세 초안
+## 5. 정량 지표
 
-### Base URL
-
-```
-http://localhost:8000/api/v1/
-```
-
-### 인증
-
-JWT Bearer Token 방식
-
-```
-Authorization: Bearer <access_token>
-```
+| 지표 | 설명 | 저장 위치 |
+| --- | --- | --- |
+| 초당 처리량 | 1초 동안 Flink가 소비한 ticker 메시지 수 | `flink_realtime_metric.total_collected_count` |
+| 평균 지연 시간 | 메시지 timestamp와 처리 시각의 평균 차이 | `flink_realtime_metric.average_latency_ms` |
+| 최대 지연 시간 | 1초 윈도우 내 가장 큰 지연 시간 | `flink_realtime_metric.max_latency_ms` |
+| 오류율 | 전체 메시지 중 비정상 메시지 비율 | `flink_realtime_metric.error_rate_percentage` |
+| 활성 마켓 수 | 1초 동안 수신된 고유 마켓 수 | `flink_realtime_metric.unique_market_count` |
+| 초당 거래대금 | 1초 동안 처리된 거래대금 합계 | `flink_realtime_metric.total_trade_volume_krw` |
+| 윈도우별 변동률 | 5분 윈도우 시작가/종가 기준 변동률 | `window_stats.change_rate` |
 
 ---
 
-### 인증 관련
+## 6. 성능 실험 및 개선
 
-### POST /auth/register/ — 회원가입
+### 실험 목적
 
-**Request Body**
+Flink 기반 실시간 처리 파이프라인에서 처리량과 지연 시간에 영향을 주는 요소를 확인하기 위해 성능 실험을 수행했습니다.
+
+측정 지표는 다음과 같습니다.
+
+- 평균 처리량(events/s)
+- 최대 처리량(events/s)
+- 평균 지연 시간(ms)
+- p95 지연 시간(ms)
+- 최대 지연 시간(ms)
+- 오류율(%)
+
+### 실험 결과
+
+| 실험 조건 | 샘플 수 | 평균 처리량 | 최대 처리량 | 평균 지연 | p95 지연 | 최대 지연 | 오류율 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 기본 설정 | 360초 | 54.95 events/s | 137 events/s | 1077.15ms | 1713.56ms | 2241.20ms | 0.00% |
+| parallelism=2 | 296초 | 65.91 events/s | 255 events/s | 1341.98ms | 2431.94ms | 2431.73ms | 0.00% |
+| parallelism=4 | 296초 | 55.40 events/s | 212 events/s | 1056.52ms | 1299.40ms | 2350.82ms | 0.00% |
+| print 제거 + DB flush 조정 | 394초 | 746.20 events/s | 1500 events/s | 346.13ms | 623.23ms | 1217.02ms | 0.00% |
+
+### 실험 해석
+
+기본 설정에서는 실제 Upbit ticker 스트림 기준으로 평균 54.95 events/s를 처리했고, 평균 지연 시간은 1077.15ms로 측정되었습니다.
+
+Flink parallelism을 2로 증가시켰을 때 평균 처리량은 증가했지만 평균 지연과 p95 지연도 함께 증가했습니다. parallelism을 4로 증가시켰을 때는 p95 지연은 개선되었지만 평균 처리량은 기본 설정과 큰 차이를 보이지 않았습니다.
+
+이를 통해 단순히 parallelism 값을 높이는 것만으로는 처리 성능이 선형적으로 개선되지 않으며, Kafka 입력량, partition 수, window 집계 방식, DB sink 처리 방식 등 전체 파이프라인 병목을 함께 고려해야 함을 확인했습니다.
+
+이후 synthetic producer를 이용해 고정 부하를 생성하고, 디버깅용 `print()` sink 제거 및 JDBC Sink flush 조건을 조정했습니다. 그 결과 평균 지연 시간과 최대 지연 시간이 감소했으며, 스트리밍 파이프라인에서는 연산 로직뿐 아니라 로그 I/O와 sink flush 조건도 latency에 영향을 줄 수 있음을 확인했습니다.
+
+### 추가 실험: market별 관측성 개선
+
+초기 Metric Job은 `window_all()`을 사용해 전체 스트림을 1초 단위로 집계했습니다. 이 구조는 전체 처리량을 보기에는 단순하지만, 특정 마켓의 지연이나 데이터 유입량 차이를 확인하기 어렵습니다.
+
+이를 보완하기 위해 `key_by(market)` 기반 마켓별 메트릭 집계를 추가했습니다. 해당 구조는 전체 처리 성능을 직접적으로 개선하기보다는, 마켓별 처리량·지연 시간·오류율을 확인할 수 있도록 관측성을 높이는 데 목적이 있습니다. 이 구조는 향후 특정 마켓의 수집 공백 감지 기능으로 확장할 수 있습니다.
+
+### 한계 및 향후 개선
+
+이번 실험은 설정 변경과 SQL 집계를 수동으로 수행했습니다. 이 방식은 반복 실험 시 조건 관리와 결과 기록의 일관성이 떨어질 수 있습니다.
+
+향후에는 benchmark runner를 작성해 실험 조건 설정, 테이블 초기화, synthetic producer 실행, 결과 쿼리, Markdown/CSV 저장을 자동화할 계획입니다. 또한 Prometheus/Grafana를 도입해 Flink backpressure, Kafka consumer lag, PostgreSQL query latency까지 함께 관찰할 수 있도록 확장할 예정입니다.
+
+
+
+---
+
+## 7. 데이터 품질 처리
+
+### 정상 데이터와 비정상 데이터 분리 저장
+
+실시간 API 데이터는 외부 시스템에서 전달되기 때문에 필드 누락, 비정상 값, 예상하지 못한 범주형 값이 포함될 수 있습니다. Sentinel-Fi는 저장 전에 다음 조건을 검증합니다.
+
+- `code`, `trade_price`, `timestamp` 필수 필드 존재 여부
+- `trade_price`, `trade_volume` 음수 여부
+- `change` 값이 `RISE`, `EVEN`, `FALL` 중 하나인지 확인
+- `stream_type` 값이 `SNAPSHOT`, `REALTIME` 중 하나인지 확인
+
+정상 데이터는 `TickerDate`에 저장하고, 비정상 데이터는 `BadTickerDate`에 저장합니다. 이때 원본 raw data와 오류 사유를 함께 남겨 이후 데이터 품질 문제를 추적할 수 있도록 했습니다. 아래는 저장되는 데이터 예시입니다.
 
 ```json
 {
-  "username": "john_doe",
-  "email": "john@example.com",
-  "password": "securePass123!"
-}
-```
-
-**Response 201**
-
-```json
-{
-  "id": "uuid",
-  "username": "john_doe",
-  "email": "john@example.com"
-}
-```
-
----
-
-### POST /auth/login/ — 로그인
-
-**Request Body**
-
-```json
-{
-  "email": "john@example.com",
-  "password": "securePass123!"
-}
-```
-
-**Response 200**
-
-```json
-{
-  "access": "eyJ...",
-  "refresh": "eyJ..."
-}
-```
-
----
-
-### POST /auth/logout/ — 로그아웃 `🔒 인증 필요`
-
-**Request Body**
-
-```json
-{ "refresh": "eyJ..." }
-```
-
-**Response 205** — No Content (Redis에 refresh 토큰 블랙리스트 등록)
-
----
-
-### 자산(종목) 관련
-
-### GET /contents-list/ — 자산 목록
-
-**Query Parameters**
-
-| 파라미터 | 타입 | 설명 |
-| --- | --- | --- |
-| category | string | crypto / stock / etf |
-| sort | string | price_change / volume / likes |
-| search | string | 종목명 또는 ticker 검색 |
-| page | int | 페이지 번호 (기본 1) |
-| page_size | int | 페이지당 개수 (기본 20) |
-
-**Response 200**
-
-```json
-{
-  "count": 100,
-  "next": "/api/v1/contents-list/?page=2",
-  "results": [
-    {
-      "id": "uuid",
-      "ticker": "BTC",
-      "name": "Bitcoin",
-      "category": "crypto",
-      "price": 95000000,
-      "change_rate": 2.34,
-      "is_anomaly": false,
-      "like_count": 1204
-    }
-  ]
-}
-```
-
----
-
-### GET /contents/{id}/ — 자산 상세
-
-**Response 200**
-
-```json
-{
-  "id": "uuid",
-  "ticker": "BTC",
-  "name": "Bitcoin",
-  "category": "crypto",
-  "market": "Upbit",
-  "description": "...",
-  "latest_price": {
-    "price": 95000000,
-    "change_rate": 2.34,
-    "volume": 3200.55,
-    "timestamp": "2026-05-08T12:00:00Z"
+  "raw_data": {
+    "code": "KRW-BTC",
+    "change": "RISE",
+    "timestamp": 1779096039644,
+    "stream_type": "REALTIME",
+    "trade_price": -1000,
+    "trade_volume": 0.5
   },
-  "insight": {
-    "pattern_match": { ... },
-    "correlation": { ... }
+  "error_log": {
+		"Negative Value Error: price or volume is negative"
   },
-  "is_liked": true
+  "created_at": "2026-05-22 00:35:19.90805+00"
 }
 ```
 
 ---
 
-### POST /like/ — 좋아요 토글 `🔒 인증 필요`
+## 8. 트러블슈팅
 
-**Request Body**
+### PyFlink 커스텀 모듈 수정 사항 미반영 및 Import Error
+#### 문제
+Flink Job 스크립트(drop_detect.py)를 수정하고 컨테이너를 재시작해도 변경 사항이 반영되지 않거나, 내부에서 참조하는 커스텀 모듈(utils.watermark)을 찾을 수 없다는 에러가 발생했습니다.
 
-```json
-{ "asset_id": "uuid" }
+#### 원인 분석
+원인은 Flink의 독특한 Python 부모-자식 프로세스(Beam Worker) 구조와 Docker 빌드 시점의 한계 때문이었습니다.
+
+Flink는 내부적으로 Python 코드를 실행하기 위해 Apache Beam Worker를 실행합니다.
+
+메인 스크립트는 마운트된 경로(@/opt/flink/pipeline)에서 실행되지만, 서브 모듈을 import할 때 Beam Worker는 이 경로를 알지 못하고 Python의 기본 라이브러리 경로인 site-packages만 탐색합니다.
+
+기존 Dockerfile에서는 빌드 시점에 COPY jobs/utils/ /usr/local/lib/.../site-packages/utils/ 명령을 통해 코드를 딱 한 번 복사했기 때문에, 로컬에서 코드를 수정해도 컨테이너 내부의 site-packages에는 옛날 코드가 그대로 남아있어 수정본이 반영되지 않았습니다.
+
+#### 해결 방법
+로컬의 커스텀 모듈 폴더를 Docker 컨테이너 내부 Beam Worker가 참조하는 site-packages 경로에 직접 볼륨 마운트(Volume Mount)하여, 로컬의 수정 사항이 컨테이너 내부에 실시간으로 동기화되도록 해결했습니다.
+
+```YAML
+# docker-compose.yml
+services:
+  flink-jobmanager:
+    volumes:
+      - ./pipeline/jobs:/opt/flink/pipeline
+      - ./pipeline/jobs/utils:/usr/local/lib/python3.10/dist-packages/utils # site-packages 직통 마운트
+```
+```Plaintext
+[실행 흐름]
+Beam Worker 실행 ➔ from utils.watermark import ... ➔ site-packages 탐색 ➔ 마운트된 로컬 utils 코드 즉시 참조
 ```
 
-**Response 200**
+### Flink TaskManager 미등록으로 인한 Job 제출 실패 (NoResourceAvailableException)
+#### 문제
+환경 마이그레이션(OS 변경) 후 Flink에 파이썬 데이터 파이프라인 파일을 제출(Submit)했을 때, 상태가 RUNNING으로 넘어가지 않고 즉시 잡이 취소되며 에러가 발생했습니다. Flink 대시보드에서 Available Task Slots: 0으로 표시되었습니다.
 
-```json
-{
-  "asset_id": "uuid",
-  "liked": true,
-  "like_count": 1205
-}
+```Bash
+py4j.protocol.Py4JJavaError: An error occurred while calling o0.execute.
+Caused by: org.apache.flink.runtime.jobmanager.scheduler.NoResourceAvailableException: Could not acquire the minimum required resources.
 ```
+#### 원인 분석
+실제 연산을 담당하는 TaskManager 컨테이너의 로그를 추적한 결과, 다음과 같은 네트워크 연결 거부 에러를 발견했습니다.
 
+```Bash
+Association with remote system [pekko.tcp://flink@<이전_컨테이너_ID>:6123] has failed ... Connection refused
+```
+TaskManager가 JobManager를 찾아가서 자격(Task Slot)을 등록해야 하는데, 환경이 바뀌면서 JobManager를 가리키는 네트워크 주소 설정(JOB_MANAGER_RPC_ADDRESS)이 누락되어 이전 환경의 고정된 컨테이너 ID를 들고 찾아가다 접속에 실패한 것이 원인이었습니다.
+
+#### 해결 방법
+docker-compose.yml 환경 변수에 Docker 내장 DNS가 컨테이너 이름을 기반으로 서로를 찾을 수 있도록 원격 프로시저 호출(RPC) 주소를 명시적으로 지정해 해결했습니다.
+
+```YAML
+# docker-compose.yml
+services:
+  flink-taskmanager:
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager # JobManager 서비스명 명시
+```
+### Airflow 내 내장 모듈 및 타 프레임워크(Django) 환경 참조 실패
+#### 문제
+Airflow DAG를 통해 업비트 마켓 코드를 주기적으로 동기화하는 태스크를 실행할 때, 프로젝트 공통 모듈 및 Django 환경을 로드하지 못하는 문제가 발생했습니다.
+
+``` Bash
+ModuleNotFoundError: No module named 'django'
+ModuleNotFoundError: No module named 'config'
+```
+#### 원인 분석
+Airflow 스케줄러와 워커 컨테이너가 로컬 파일 시스템에 있는 Django 비즈니스 로직 폴더(backend-pjt)의 위치를 알지 못했고, Airflow 컨테이너 자체에 django 패키지가 설치되어 있지 않아 발생한 격리 환경 문제였습니다.
+
+#### 해결 방법
+Airflow 컨테이너 빌드 시점에 필요한 패키지들이 설치되도록 커스텀 Dockerfile 설정을 보완하고, Django 프로젝트 루트 폴더를 Airflow 컨테이너 내부로 통째로 볼륨 맵핑하여 Airflow 작업 내에서 Django ORM 및 공통 설정을 그대로 임포트해 사용할 수 있도록 구조를 맞췄습니다.
+
+```YAML
+# docker-compose.yml
+services:
+  airflow-worker:
+    build:
+      context: ./pipeline
+      dockerfile: airflow.dockerfile # 내부에서 pip install django 수행
+    volumes:
+      - ./pipeline/dags:/opt/airflow/dags
+      - ./backend-pjt:/opt/airflow/backend-pjt # Django 루트 폴더 맵핑
+```
 ---
 
-### 대시보드 관련
+## 9. 실행 방법
 
-### GET /dashboard/ — 사용자 활동 통계 `🔒 인증 필요`
+### 인프라 실행
 
-**Response 200**
-
-```json
-{
-  "liked_assets": [
-    { "ticker": "BTC", "name": "Bitcoin", "change_rate": 2.34 }
-  ],
-  "recent_viewed": [
-    { "ticker": "ETH", "name": "Ethereum", "viewed_at": "2026-05-08T11:30:00Z" }
-  ],
-  "category_stats": {
-    "crypto": 45,
-    "stock": 30,
-    "etf": 5
-  },
-  "activity_by_date": [
-    { "date": "2026-05-01", "views": 12, "likes": 3 }
-  ]
-}
+```bash
+docker compose up -d
 ```
 
----
+### Django 마이그레이션
 
-### GET /dashboard/alerts/ — 이상 징후 알림 목록 `🔒 인증 필요`
-
-**Response 200**
-
-```json
-{
-  "alerts": [
-    {
-      "asset": { "ticker": "BTC", "name": "Bitcoin" },
-      "anomaly_type": "flash_crash",
-      "change_rate": -8.3,
-      "detected_at": "2026-05-08T09:15:00Z"
-    }
-  ]
-}
+```bash
+cd backend-pjt
+python manage.py migrate
 ```
 
----
+### Upbit WebSocket Producer 실행
 
-### 검색
-
-### GET /search/ — 통합 검색 (Elasticsearch)
-
-**Query Parameters**
-
-| 파라미터 | 타입 | 설명 |
-| --- | --- | --- |
-| q | string | 검색어 (종목명, ticker, 뉴스 키워드) |
-| type | string | assets / news / all (기본: all) |
-
-**Response 200**
-
-```json
-{
-  "assets": [
-    { "id": "uuid", "ticker": "BTC", "name": "Bitcoin", "score": 0.98 }
-  ],
-  "news": [
-    { "title": "비트코인 급등 배경 분석", "published_at": "2026-05-08T06:00:00Z" }
-  ]
-}
+```bash
+python backend-pjt/collector/upbit_ws.py
+# 터미널 분할 후
+python backend-pjt/collector/kafka-consumer.py
 ```
 
----
+### Flink Job 실행
 
-### 에러 응답 형식
-
-```json
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "인증이 필요합니다.",
-    "detail": "JWT token이 만료되었습니다."
-  }
-}
+```bash
+docker exec -it sentinel_fi_flink_jobmanager flink run -py /opt/flink/pipeline/drop_detect.py
+# 터미널 분할 후
+docker exec -it sentinel_fi_flink_jobmanager flink run -py /opt/flink/pipeline/metric_collections.py
 ```
-
-| HTTP 코드 | 코드 | 상황 |
-| --- | --- | --- |
-| 400 | VALIDATION_ERROR | 요청 파라미터 오류 |
-| 401 | UNAUTHORIZED | 인증 토큰 없음/만료 |
-| 403 | FORBIDDEN | 권한 없음 |
-| 404 | NOT_FOUND | 리소스 없음 |
-| 429 | RATE_LIMITED | 요청 한도 초과 |
-| 500 | SERVER_ERROR | 서버 내부 오류 |
-
----
-
-## 6. 개발 일정 & 역할 분담
-
-### 전체 일정 (예시: 5주)
-
-| 주차 | 목표 | 산출물 |
-| --- | --- | --- |
-| **1주차** | 환경 설정 + 설계 확정 | DB 스키마 확정, API 명세서, Docker Compose 환경 |
-| **2주차** | 백엔드 기초 + 데이터 수집 | Django 기본 API, Kafka Producer, Flink 기초 연산 |
-| **3주차** | 프론트엔드 + 인증 | Vue Router 구조, 로그인/회원가입 UI, JWT 연동 |
-| **4주차** | 대시보드 + 인사이트 | Chart.js 대시보드, Spark 배치 로직, Elasticsearch 검색 |
-| **5주차** | 통합 + 마무리 | 전체 통합 테스트, API 명세서 완성, 발표 준비 |
-
-> 공통: Docker Compose 환경 구성, API 명세서 작성, 코드 리뷰
-> 
-
----
-
-### 산출물 디렉터리 구조
-
-```
-de-pjt/
-├── backend-pjt/        # Django REST Framework
-│   ├── apps/
-│   │   ├── auth/       # 회원관리, JWT
-│   │   ├── assets/     # 종목 목록·상세·좋아요
-│   │   ├── dashboard/  # 대시보드·알림
-│   │   └── search/     # Elasticsearch 연동
-│   └── config/
-├── front-pjt/          # Vue.js
-│   └── src/
-│       ├── views/
-│       │   ├── LoginView.vue
-│       │   ├── MainView.vue
-│       │   ├── ContentsView.vue
-│       │   ├── DetailView.vue
-│       │   └── DashboardView.vue
-│       └── components/
-├── data-pjt/           # 데이터 파이프라인
-│   ├── kafka/          # Producer 설정
-│   ├── flink/          # CEP·집계 로직
-│   ├── spark/          # 배치 분석 스크립트
-│   └── airflow/        # DAG 파일
-└── docs/
-    └── api-spec.md     # API 명세서
-```
-
----
