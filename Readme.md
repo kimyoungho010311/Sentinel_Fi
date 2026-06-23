@@ -1,16 +1,10 @@
 # Sentinel-Fi
 
 > Kafka와 Flink 기반 실시간 암호화폐 시세 처리 및 이상 변동 탐지 파이프라인
-
-Sentinel-Fi는 Upbit WebSocket에서 발생하는 실시간 암호화폐 ticker 데이터를 Kafka로 수집하고, Apache Flink에서 실시간 집계 및 이상 변동 탐지를 수행한 뒤 PostgreSQL에 저장하는 데이터 엔지니어링 프로젝트입니다.
-
-초기에는 금융 데이터 기반 웹 서비스로 기획했지만, 현재는 실시간 데이터 수집, 스트림 처리, 지연 시간 측정, 데이터 품질 검증, 성능 실험을 중심으로 프로젝트 범위를 재정의했습니다.
-
 ---
 
 ## 1. Overview
-
-이 프로젝트의 목표는 실시간 금융 데이터를 안정적으로 수집하고, 처리 과정에서 발생하는 지연과 병목을 정량적으로 관찰할 수 있는 스트리밍 파이프라인을 구축하는 것입니다.
+Sentinel-Fi는 Upbit에서 발생하는 실시간 암호화폐 거래 데이터를 Kafka로 수집하고, Apache Flink에서 실시간 집계 및 이상 변동 탐지를 수행한 뒤 PostgreSQL에 저장하는 데이터 엔지니어링 프로젝트입니다.
 
 핵심 목표는 다음과 같습니다.
 
@@ -22,11 +16,10 @@ Sentinel-Fi는 Upbit WebSocket에서 발생하는 실시간 암호화폐 ticker 
 - Airflow를 통한 마켓 코드 동기화 자동화
 - Django API를 통한 실시간 메트릭 조회
 
----
 
 ## 2. Architecture
 
-![System Architecture](img/system_architecture.png)
+![System Architecture](img/system_architecture.jpg)
 
 ### 주요 데이터 흐름
 
@@ -72,14 +65,13 @@ Airflow DAG
 |Backend| Django| 데이터 모델링 및 메트릭 조회 API|
 |Infra| Docker | Kafka, Flink, PostgreSQL, Airflow 로컬 실행 환경 구성|
 
----
-## 4. Core Features.
+## 4. Core Features
 ### 4.1 실시간 데이터 수집
-Upbit WebSocket을 통해 여러 암호화폐 마켓의 ticker 데이터를 실시간으로 구독합니다. 수신한 데이터는 Kafka `ticker` 토픽으로 전송되며, 이후 Flink Job과 Django Consumer가
+Upbit WebSocket을 통해 여러 암호화폐 마켓의 거래 데이터를 실시간으로 구독합니다. 수신한 데이터는 Kafka `ticker` 토픽으로 전송되며, 이후 Flink Job과 Django Consumer가
 독립적으로 소비합니다.
 
 
-Kafka를 중간 버러포 사용함으로써 데이터 수집 계층과 처리 계층을 분리했습니다. 이를 통해 처리 계층이 일시적으로 느려져도 Producer는 Kafka에 메세지를 계속 적재할 수 있습니다.
+Kafka를 중간 버퍼로 사용함으로써 데이터 수집 계층과 처리 계층을 분리했습니다. 이를 통해 처리 계층이 일시적으로 느려져도 Producer는 Kafka에 메세지를 계속 적재할 수 있습니다.
 
 관련 파일:
 - `backend-pjt/collector/upbit_ws.py`
@@ -94,7 +86,7 @@ Flink Metric Job은 Kafka `ticker` 토픽에서 메세지를 읽고, 1초 Tumbli
 - 초당 수집 데이터 수
 - 오류 데이터 수
 - 오류율
-- 평규 ㄴ지연 시간
+- 평균 지연 시간
 - 최대 지연 시간
 - 활성 마켓 수
 - 초당 총 거래대금
@@ -121,6 +113,9 @@ Upbit에서 지원하는 마켓 목록은 시간이 지나며 변경될 수 있�
 
 Airflow는 초 단위 실시간 처리에는 적합하지 않기 때문에, 실시간 스트림 처리는 Flink가 담당하고 Airflow는 주기적 운영 작업을 담당하도록 역할을 분리했습니다.
 
+![Sync Market Code](img/sync_market_code_example.png)
+> 새롭게 상장되는 코인과 상장 폐지되는 코인이 있다면 로그를 남기고 DB와 동기화합니다.
+
 관련 파일:
 - `pipeline/dags/fetch_coins.py`
 - `pipeline/dags/utils.py`
@@ -134,6 +129,9 @@ Kafka Consumer는 ticker 데이터를 저장하기 전 필수 필드 누락, 음
 
 정상 데이터는 ticker_date에 저장하고, 비정상 데이터는 원본 payload와 오류 사유를 함께 bad_ticker_date에 저장합니다. 이를 통해 데이터 품질 문제가 발생했을 때 어떤 데이터가 어떤 이유로 제외되었는지 추적할 수 있습니다.
 
+실제로 업비트에서는 정상 데이터만 전송되어 임의로 비정상 데이터를 Kafka 에게 전송했습니다. 테스트 방법은 8.6절에 있습니다.
+![Bad Ticker Data](img/bad_ticker_example.png)
+> 비정상 거래 데이터가 감지되면 위와같이 DB에 저장됩니다.
 
 검증 조건:
 - `code`, `trade_price`, `timestamp` 필수 필드 존재 여부
@@ -145,7 +143,6 @@ Kafka Consumer는 ticker 데이터를 저장하기 전 필수 필드 누락, 음
 - `backend-pjt/collector/kafka_consumer.py`
 - `backend-pjt/market_data/models.py`
 
----
 ## 5. Metrics
 
 Sentinel-Fi는 단순히 데이터를 저장하는 것에서 끝나지 않고, 파이프라인 상태를 숫자로 관찰할 수 있도록 별도 메트릭을 저장합니다.
@@ -178,31 +175,30 @@ Flink 기반 실시간 처리 파이프라인에서 처리량과 지연 시간�
 | 실험 조건 | 샘플 수 | 평균 처리량 | 최대 처리량 | 평균 지연 | p95 지연 | 최대 지연 | 오류율 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | 기본 설정 | 360초 | 54.95 events/s | 137 events/s | 1077.15ms | 1713.56ms | 2241.20ms | 0.00% |
-| parallelism=2 | 296초 | 65.91 events/s | 255 events/s | 1341.98ms | 2431.94ms | 2431.73ms | 0.00% |
-| parallelism=4 | 296초 | 55.40 events/s | 212 events/s | 1056.52ms | 1299.40ms | 2350.82ms | 0.00% |
+| `parallelism=2` | 296초 | 65.91 events/s | 255 events/s | 1341.98ms | 2431.94ms | 2431.73ms | 0.00% |
+| `parallelism=4` | 296초 | 55.40 events/s | 212 events/s | 1056.52ms | 1299.40ms | 2350.82ms | 0.00% |
 | print 제거 + DB flush 조정 | 394초 | 746.20 events/s | 1500 events/s | 346.13ms | 623.23ms | 1217.02ms | 0.00% |
 
 ---
 
-### 6.3 실험 해성
+### 6.3 실험 해석
 기본 설정에서는 실제 Upbit ticker 스트림 기준으로 평균 54.95 events/s를 처리했고, 평균 지연 시간은 1077.15ms로 측정되었습니다.
 
 Flink parallelism을 2로 증가시켰을 때 평균 처리량은 증가했지만 평균 지연과 p95 지연도 함께 증가했습니다. parallelism을 4로 증가시켰을 때는 p95 지연은 개선되었지만 평균 처리량은 기본 설정과 큰 차이를 보이지 않았습니다.
 
 이를 통해 단순히 parallelism 값을 높이는 것만으로는 처리 성능이 선형적으로 개선되지 않으며, Kafka 입력량, partition 수, window 집계 방식, DB sink 처리 방식 등 전체 파이프라인 병목을 함께 고려해야 함을 확인했습니다.
 
-추가로 synthetic producer를 이용해 고정 부하를 생성하고, 디버깅용 print() sink 제거 및 JDBC Sink flush 조건을 조정했습니다. 그 결과 평균 지연 시간과 최대 지연 시간이 감소했으며, 스트리밍 파이프라인에서는 연산 로직뿐 아니라 로그 I/O와 sink flush 조건도 latency에 영향을 줄 수 있음을 확인했습니다.
+추가로 의도적으로 데이터 부하를 줘 테스트한 결과, 디버깅용 print() sink 제거 및 JDBC Sink flush 조건을 조정했습니다. 그 결과 평균 지연 시간과 최대 지연 시간이 감소했으며, 스트리밍 파이프라인에서는 연산 로직뿐 아니라 로그 I/O와 sink flush 조건도 latency에 영향을 줄 수 있음을 확인했습니다.
 
 ---
 
 ### 6.4 성능 실험의 한계
-이번 실험은 Flink Job 설정 변경, synthetic producer 실행, SQL 집계를 수동으로 수행했습니다. 이 방식은 반복 실험 시 조건 관리와 결과 기록의 일관성이 떨어질 수 있습니다.
+이번 실험은 Flink Job 설정 변경, 부하 테스트용 데이터 생성기 실행, SQL 집계를 수동으로 수행했습니다. 이 방식은 반복 실험 시 조건 관리와 결과 기록의 일관성이 떨어질 수 있습니다.
 
-향후에는 benchmark runner를 작성해 실험 조건 설정, 메트릭 테이블 초기화, synthetic producer 실행, 결과 쿼리, Markdown/CSV 저장을 자동화할 계획입니다. 
+향후에는 benchmark runner를 작성해 실험 조건 설정, 메트릭 테이블 초기화, 부하 테스트용 데이터 생성기 실행, 결과 쿼리, Markdown/CSV 저장을 자동화할 계획입니다. 
 
 또한 Prometheus/Grafana를 도입해 Flink backpressure, Kafka consumer lag, PostgreSQL query latency까지 함께 관찰할 수 있도록 확장할 예정입니다.
 
----
 
 ## 7. Troubleshooting
 ### 7.1 PyFlink 커스텀 모듈 수정 사항 미반영
@@ -234,9 +230,8 @@ TaskManager 환경 변수에 JobManager RPC 주소를 명시했습니다.
 environment:
   - JOB_MANAGER_RPC_ADDRESS=jobmanager
   ```
----
 
-8. How to Run
+## 8. How to Run & Test
 ### 8.1 인프라 실행
 ```bash
 docker compose up -d
@@ -260,11 +255,22 @@ docker exec -it sentinel_fi_flink_jobmanager flink run -py /opt/flink/pipeline/d
 docker exec -it sentinel_fi_flink_jobmanager flink run -py /opt/flink/pipeline/metric_collections.py
 docker exec -it sentinel_fi_flink_jobmanager flink run -py /opt/flink/pipeline/market_metric_collections.py
 ```
-### 8.6 Synthetic Producer 실행
+
+### 8.6 비정상 데이터 검증 테스트
+``` bash
+docker exec -it sentinel_fi_kafka kafka-console-producer --bootstrap-server localhost:9092 --topic ticker
+> # 필수 코드 누락
+> {"trade_price": 50000000, "timestamp": 1718942400000, "stream_type": "REALTIME", "change": "RISE"}
+> # 음수 거래값
+> {"code": "KRW-BTC", "trade_price": -100, "timestamp": 1718942400000, "stream_type": "REALTIME", "change": "RISE"}
+
+```
+
+### 8.7 부하 테스트용 데이터 생성기 실행
 ``` bash
 python backend-pjt/collector/synthetic_ticker_producer.py --rate 1000 --duration 600 --bad-rate 0.0
 ```
----
+
 ## 9. Future Work
 - Kafka consumer lag 측정 지표 추가
 - benchmark runner를 통한 성능 실험 자동화
