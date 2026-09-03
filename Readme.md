@@ -20,28 +20,25 @@ Sentinel-Fi는 Upbit에서 발생하는 실시간 암호화폐 거래 데이터�
 ## 2. Architecture
 
 ![System Architecture](img/system_architecture.jpg)
-
-### 주요 데이터 흐름
-
-```text
+```
 Upbit WebSocket
     ↓
 Kafka Producer
     ↓
 Kafka Topic: ticker
-    ├── Flink Metric Job
-    │       └── flink_realtime_metric
+    ├── [Stream Processing & Validation] Apache Flink Jobs
+    │       ├── Metric Job (ProcessWindowFunction 정제 및 is_error 플래그 처리)
+    │       │       ├── 정상 데이터 집계 -> flink_realtime_metric
+    │       │       └── 오류 메트릭(error_rate) 및 bad_ticker_date 적재
+    │       └── Drop Detection Job -> window_stats
     │
-    ├── Flink Drop Detection Job
-    │       └── window_stats
-    │
-    └── Django Kafka Consumer
-            ├── ticker_date
-            └── bad_ticker_date
+    └── [Raw Data Persistence] Python Kafka Consumer
+            └── ticker_date (원천 Ticker 저장)
 
 Airflow DAG
     └── market table sync
 ```
+
 ### 핵심 테이블
 
 |테이블	                  |                         역할|
@@ -123,25 +120,24 @@ Airflow는 초 단위 실시간 처리에는 적합하지 않기 때문에, 실�
 
 ---
 
-### 4.6 데이터 품질 검증
-Kafka Consumer는 ticker 데이터를 저장하기 전 필수 필드 누락, 음수 값, 잘못된 범주형 값 등을 검증합니다.
+### 4.6 Flink 기반 스트림 데이터 정제 및 품질 검증
 
+Sentinel-Fi는 파이프라인으로 유입되는 원천 데이터의 이상 유무를 Apache Flink 연산 엔진 단에서 일괄 검증하고 정제합니다.
 
-정상 데이터는 ticker_date에 저장하고, 비정상 데이터는 원본 payload와 오류 사유를 함께 bad_ticker_date에 저장합니다. 이를 통해 데이터 품질 문제가 발생했을 때 어떤 데이터가 어떤 이유로 제외되었는지 추적할 수 있습니다.
+#### 1) Flink Stream 진입점 정제 및 파이프라인 방어
+* Kafka `ticker` 토픽을 읽어오는 Flink Job의 `ProcessWindowFunction` 단계에서 데이터 파싱 및 무결성을 검증합니다.
+* **검증 조건:** `code`, `trade_price`, `timestamp` 필수 필드 존재 여부, `trade_price` 및 `trade_volume` 음수 여부, `change` 및 `stream_type` 범주형 값 정합성.
+* **논리적 격리:** 예외나 이상 데이터가 발생하더라도 Flink Stream 처리 프로세스가 종료(Crash)되지 않도록 `is_error` 플래그를 True로 할당하여 정상 스트림 흐름에서 논리적으로 격리합니다.
 
-실제로 업비트에서는 정상 데이터만 전송되어 임의로 비정상 데이터를 Kafka 에게 전송했습니다. 테스트 방법은 8.6절에 있습니다.
-![Bad Ticker Data](img/bad_ticker_example.png)
-> 비정상 거래 데이터가 감지되면 위와같이 DB에 저장됩니다.
-
-검증 조건:
-- `code`, `trade_price`, `timestamp` 필수 필드 존재 여부
-- `trade_price`, `trade_volume` 음수 여부
-- `change` 값이 RISE, EVEN, FALL 중 하나인지 확인
-- `stream_type` 값이 SNAPSHOT, REALTIME 중 하나인지 확인
+#### 2) 정상 데이터 연산 보호 및 DLQ 모니터링
+* **정상 데이터(`valid_records`):** 1초 Tumbling Window 및 5분 Sliding Window 연산(평균 지연 시간, 초당 거래 대금, 급등락 변동률)에만 활용하여 실시간 집계의 연산 무결성을 보호합니다.
+* **오염 데이터 격리 및 메트릭화:** 오염 데이터는 폐기하지 않고 원본 Payload와 발생 원인을 `bad_ticker_date` 테이블에 적재함과 동시에, 윈도우 단위의 초당 오류 건수(`error_count`) 및 오류율(`error_rate_percentage`) 메트릭으로 전환해 `flink_realtime_metric`에 저장함으로써 Dead Letter Queue(DLQ) 모니터링 환경을 구축합니다.
 
 관련 파일:
-- `backend-pjt/collector/kafka_consumer.py`
+- `pipeline/jobs/metric_collections.py`
+- `pipeline/jobs/drop_detect.py`
 - `backend-pjt/market_data/models.py`
+
 
 ## 5. Metrics
 
